@@ -5,7 +5,7 @@ checkpoints/
 weights/
 logs/
 wandb/
-
+dataset/
 
 # ===== Python =====
 __pycache__/
