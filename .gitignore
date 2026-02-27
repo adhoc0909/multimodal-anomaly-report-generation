@@ -71,3 +71,6 @@ legacy/
 
 # jupyter
 notebooks/
+
+# docs
+docs/

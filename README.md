@@ -26,7 +26,9 @@ https://github.com/user-attachments/assets/a9c36ca3-5f5e-4425-a644-5457553208bb
 
 ## Overview
 
-**Smart Factory Anomaly Reporting System** is an end-to-end multimodal pipeline that goes beyond conventional anomaly detection. Instead of just producing heatmaps, it automatically generates structured defect reports — including cause, location, and recommended actions — using LLMs augmented with domain knowledge and visual retrieval.
+**Smart Factory Anomaly Reporting System** is an end-to-end multimodal pipeline that goes beyond conventional anomaly detection.
+Instead of just producing heatmaps, it automatically generates structured defect reports
+— including cause, location, and recommended actions — using LLMs augmented with domain knowledge and visual retrieval. 
 
 Key capabilities:
 - **Anomaly Detection** via [Anomalib](https://github.com/open-edge-platform/anomalib) (PatchCore / EfficientAD / WinCLIP)
@@ -34,31 +36,19 @@ Key capabilities:
 - **Dual RAG**: Knowledge RAG (Chroma + domain JSON) + Visual RAG (DINOv2 few-shot)
 - **Multi-LLM Support**: GPT-4o, Claude Sonnet, Gemini 2.5, InternVL, Gemma3, Qwen, LLaVA
 - **Production API**: Async FastAPI pipeline with PostgreSQL + React dashboard
-- **Evaluated on [MMAD Benchmark](https://arxiv.org/abs/2410.09453)** — outperforms paper-reported GPT-4o SOTA
+- **Evaluated on [MMAD](https://arxiv.org/abs/2410.09453)** — outperforms paper-reported GPT-4o SOTA
 
 ---
 
-## Table of Contents
-
-- [Results](#-results)
-- [System Architecture](#️-system-architecture)
-- [RAG Pipeline](#-rag-pipeline)
-- [Supported Models](#-supported-models)
-- [Installation](#️-installation)
-- [Quick Start](#-quick-start)
-- [Project Structure](#-project-structure)
-- [Citation](#-citation)
-
----
 
 ## 📊 Results
 
-Evaluated on the [MMAD](https://arxiv.org/abs/2410.09453) MCQ evaluation protocol.
+Evaluated on the [MMAD](https://arxiv.org/abs/2410.09453) MCQ evaluation protocol.  
 **Gemma3-27B INT4 + AD + RAG achieves 75.1%, surpassing the paper-reported GPT-4o SOTA (74.9%).**
 
-> Evaluation set: GoodsAD (6 classes) + MVTec-LOCO (4 classes, `splicing_connectors` excluded), 99 images total, 1-shot
+> Evaluation set: GoodsAD (6 classes) + MVTec-LOCO (4 classes), 99 images total, 1-shot
 
-### LLM Benchmark (LLM Only, No AD / No RAG)
+### LLM Results (LLM Only, No AD / No RAG)
 
 | Type | Model | Params | Accuracy (%) | Latency (s/img) |
 |:-----|:------|:------:|:------------:|:---------------:|
@@ -90,12 +80,11 @@ Evaluated on the [MMAD](https://arxiv.org/abs/2410.09453) MCQ evaluation protoco
 ## 🏗️ System Architecture
 
 <div align="center">
-<img src="images/System_Architecture.png" width="80%">
+<img src="images/System_Architecture.png" width="90%">
 </div>
 
-**Production Pipeline** (async):
-`POST /inspect` → `AdService.predict_batch()` → PostgreSQL initial save → ThreadPoolExecutor (RAG + LLM) → PostgreSQL final update  
-Watchdog: records stuck in `processing` for 120+ seconds are automatically marked as `failed`.
+**Production Pipeline**: `POST /inspect` → `AdService` → PostgreSQL → ThreadPool (RAG + LLM) → PostgreSQL<br>
+**Watchdog**: auto-fails records stuck in `processing` for 120s+
 
 ---
 
@@ -103,22 +92,17 @@ Watchdog: records stuck in `processing` for 120+ seconds are automatically marke
 
 ### Knowledge RAG
 
-`domain_knowledge.json` (`{dataset → category → defect_type → description}`) → Chroma Vector DB → Metadata Filter + Semantic Search → Prompt Injection
+`domain_knowledge.json` (`{dataset → category → defect_type → description}`)<br>
+→ Chroma Vector DB → Metadata Filter + Semantic Search → Prompt Injection
 
 - Embedding: `paraphrase-multilingual-MiniLM-L12-v2`
 - Vector DB: Chroma (local persist, `vectorstore/domain_knowledge/`)
 
 ### Visual RAG
 
-DINOv2 (`dinov2_vits14`) Embedding → per-category `.pkl` index → top-k similar normal images as few-shot examples
+DINOv2 (`dinov2_vits14`) Embedding → per-category `.pkl` index<br>
+→ top-k similar normal images as few-shot examples
 
-```python
-from src.rag.visual_rag import VisualRAG
-
-vrag = VisualRAG(index_dir="rag/")
-vrag.build_all(dataset_root="dataset/MMAD")      # build per-category pkl index
-results = vrag.search(query_image_path, category="carpet", k=1)
-```
 
 ---
 
@@ -145,14 +129,7 @@ results = vrag.search(query_image_path, category="carpet", k=1)
 - Docker & Docker Compose (for deployment)
 - PostgreSQL (for API server)
 
-### 1. Clone
-
-```bash
-git clone https://github.com/<org>/smart-factory-anomaly-report.git
-cd smart-factory-anomaly-report
-```
-
-### 2. Install Dependencies
+### 1. Install Dependencies
 
 ```bash
 # Install uv (if not present)
@@ -244,39 +221,14 @@ smart-factory-anomaly-report/
 
 ---
 
-## 📄 Documentation
-
-| Document | Description |
-|:---------|:------------|
-| [`docs/deploy-and-handoff.md`](docs/deploy-and-handoff.md) | Server deployment guide |
-| [`docs/experiment-runner.md`](docs/experiment-runner.md) | Benchmark experiment config |
-| [`docs/report-pipeline-guide.md`](docs/report-pipeline-guide.md) | Report generation pipeline |
-| [`docs/incoming-auto-ingest.md`](docs/incoming-auto-ingest.md) | Filesystem auto-ingest setup |
-
----
-
 ## 🙏 Acknowledgements
 
 - [Anomalib](https://github.com/open-edge-platform/anomalib) — anomaly detection backbone
-- [MMAD](https://arxiv.org/abs/2410.09453) — evaluation benchmark and dataset
+- [MMAD](https://arxiv.org/abs/2410.09453) — evaluation dataset
 - [DINOv2](https://github.com/facebookresearch/dinov2) — visual RAG backbone
 
 ---
 
-## 📝 Citation
-
-If you find this project useful, please cite the MMAD benchmark:
-
-```bibtex
-@article{jiang2024mmad,
-  title={MMAD: The First-Ever Comprehensive Benchmark for Multimodal LLMs in the Industrial Anomaly Detection Domain},
-  author={Jiang, Xi and others},
-  journal={arXiv preprint arXiv:2410.09453},
-  year={2024}
-}
-```
-
----
 
 ## License
 
