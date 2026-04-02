@@ -1,0 +1,81 @@
+# ── 최소 요구 버전: Docker Compose v2.24.0+ ─────────────────────────────────────
+# env_file required: false 문법 지원 버전. 확인: docker compose version
+# 구버전 환경(GCP VM 등)은 반드시 .env 파일을 먼저 생성하세요:
+#   cp .env.example .env  → 값 채우기
+# ────────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: inspector
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: inspection
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"    # 로컬 개발용 접근만 허용 (외부 노출 차단)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inspector -d inspection"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI 백엔드 ───────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false          # .env 없어도 기본값으로 동작
+    environment:
+      DATABASE_URL: postgresql://inspector:${POSTGRES_PASSWORD:-password}@postgres:5432/inspection
+      INCOMING_ROOT: /app/incoming
+      OUTPUT_DIR: /app/outputs
+      AD_CHECKPOINT_DIR: /app/checkpoints
+      RAG_INDEX_DIR: /app/rag
+      DOMAIN_RAG_PERSIST_DIR: /app/vectorstore/domain_knowledge
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./checkpoints:/app/checkpoints        # PatchCore 모델 가중치
+      - ./vectorstore:/app/vectorstore        # Chroma 벡터DB
+      - ./rag:/app/rag                        # DINOv2 Visual RAG 인덱스
+      - ./dataset:/app/dataset                # MMAD 데이터셋
+      - outputs:/app/outputs                  # 히트맵, 마스크, 오버레이
+      - incoming:/app/incoming                # 자동 수신 이미지
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # /settings/llm-model: DB 조회 없이 app.state 값만 반환 → 가벼운 헬스체크
+      # /reports는 DB 쿼리 필수라 오류 시 500 반환 → frontend 시작 실패 위험
+      test: ["CMD", "curl", "-f", "http://localhost:8000/settings/llm-model"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # lifespan 순서: DB마이그레이션 → AdService → DINOv2 → Chroma → LLM 모델 로딩
+      # InternVL 8B GPU 기준 ~90초, Gemini API 기준 ~10초
+      start_period: 120s
+
+  # ── React 프론트엔드 (nginx) ─────────────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  outputs:
+  incoming:

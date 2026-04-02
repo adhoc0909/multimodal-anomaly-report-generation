@@ -7,10 +7,8 @@ anomalib>=2.0.0,<3.0.0
 torch>=2.0.0
 torchvision>=0.15.0
 pytorch-lightning>=2.0.0
-
-# ONNX inference
-onnxruntime>=1.16.0
-onnx>=1.14.0
+open-clip-torch>=3.2.0
+torchao>=0.9.0
 
 # Logging
 wandb>=0.15.0
@@ -22,8 +20,8 @@ fastapi>=0.115.0
 uvicorn>=0.30.0
 pydantic>=2.8.0
 pydantic-settings>=2.4.0
-streamlit>=1.37.0
 python-multipart>=0.0.9
+python-dotenv>=1.2.1
 
 # ========================================
 # Core utilities
@@ -37,15 +35,51 @@ tqdm>=4.66.0
 jsonschema>=4.20.0
 pandas>=2.0.0
 psutil>=5.9.0
+psycopg2-binary>=2.9.11
+pypdf>=6.7.0
 
 # ========================================
-# LLM Evaluation (optional)
+# LLM / MLLM
 # ========================================
 transformers>=4.40.0
 accelerate>=0.27.0
 sentencepiece>=0.2.0
 qwen-vl-utils>=0.0.2
+openai>=2.17.0
+google-generativeai>=0.8.6
 
+# ========================================
+# LangChain 생태계
+# ========================================
+langchain>=0.3.27
+langchain-core>=0.3.83
+langchain-experimental>=0.3.4
+langchain-community>=0.3.27
+langchain-openai>=0.3.35
+langchain-anthropic>=0.3.22
+langchain-text-splitters>=0.3.11
+langchain-chroma>=0.2.6
+langchain-google-genai>=2.1.12
+langchain-huggingface>=0.3.1
+langchain-teddynote>=0.5.4
+langchainhub>=0.1.21
+langgraph>=1.0.1
+langsmith>=0.6.9
+
+# ========================================
+# RAG / Embedding
+# ========================================
+sentence-transformers>=5.2.2
+
+# ========================================
 # Visualization
+# ========================================
 matplotlib>=3.8.0
 seaborn>=0.13.0
+
+# ========================================
+# Korean NLP (선택)
+# ========================================
+deepl>=1.22.0
+kiwipiepy>=0.22.2
+konlpy>=0.6.0

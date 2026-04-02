@@ -109,6 +109,10 @@ class LLaVAClient(BaseLLMClient):
         else:
             self._load_model_llava()
 
+    def load_model(self):
+        """Public interface for model warm-up before timed evaluation."""
+        self._load_model()
+
     def build_payload(
         self,
         query_image_path: str,
@@ -116,6 +120,7 @@ class LLaVAClient(BaseLLMClient):
         questions: List[Dict[str, str]],
         ad_info: Optional[Dict] = None,
         instruction: Optional[str] = None,
+        report_mode: bool = False,
     ) -> dict:
         """Build LLaVA message format."""
         return {
@@ -124,6 +129,7 @@ class LLaVAClient(BaseLLMClient):
             "questions": questions,
             "ad_info": ad_info,
             "instruction": instruction,
+            "report_mode": report_mode,
         }
 
     def _generate_hf(self, payload: dict) -> str:
@@ -133,6 +139,7 @@ class LLaVAClient(BaseLLMClient):
         # Select instruction based on AD info availability
         ad_info = payload.get("ad_info")
         instruction = payload.get("instruction")
+        report_mode = bool(payload.get("report_mode", False))
         if instruction is None:
             if ad_info:
                 instruction = INSTRUCTION_WITH_AD.format(ad_info=format_ad_info(ad_info))
@@ -148,12 +155,15 @@ class LLaVAClient(BaseLLMClient):
                 prompt += "<image>\n"
 
         prompt += "Test image:\n<image>\n"
-        prompt += "Following is new question list:\n"
-
-        for q in payload["questions"]:
-            prompt += q["text"]
-
-        prompt += "\nAnswer with the option's letter from the given choices directly.\nASSISTANT:"
+        if report_mode:
+            for q in payload["questions"]:
+                prompt += q["text"]
+            prompt += "\nJSON only.\nASSISTANT:"
+        else:
+            prompt += "Following is new question list:\n"
+            for q in payload["questions"]:
+                prompt += q["text"]
+            prompt += "\nAnswer with the option's letter from the given choices directly.\nASSISTANT:"
 
         # Load images
         images = []
@@ -198,6 +208,7 @@ class LLaVAClient(BaseLLMClient):
         # Select instruction based on AD info availability
         ad_info = payload.get("ad_info")
         hint = payload.get("instruction")
+        report_mode = bool(payload.get("report_mode", False))
         if hint is None:
             if ad_info:
                 hint = INSTRUCTION_WITH_AD.format(ad_info=format_ad_info(ad_info))
@@ -211,12 +222,15 @@ class LLaVAClient(BaseLLMClient):
                 question += f"{DEFAULT_IMAGE_TOKEN}\n"
 
         question += f"Test image:\n{DEFAULT_IMAGE_TOKEN}\n"
-        question += "Following is new question list:\n"
-
-        for q in payload["questions"]:
-            question += q["text"]
-
-        qs = hint + '\n' + question + "\nAnswer with the option's letter from the given choices directly."
+        if report_mode:
+            for q in payload["questions"]:
+                question += q["text"]
+            qs = hint + '\n' + question + "\nJSON only."
+        else:
+            question += "Following is new question list:\n"
+            for q in payload["questions"]:
+                question += q["text"]
+            qs = hint + '\n' + question + "\nAnswer with the option's letter from the given choices directly."
 
         conv = conv_templates[self.conv_mode].copy()
         conv.append_message(conv.roles[0], qs)

@@ -1,8 +1,0 @@
-runtime_config: configs/anomaly.yaml
-
-eval:
-  few_shot_k: 1           # use templates from mmad.json (1-shot default)
-  use_similar_template: true
-  max_images: 200         # set null for all
-  reproduce: false        # placeholder for future caching
-  output_dir: outputs/eval

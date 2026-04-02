@@ -76,6 +76,7 @@ class ClaudeClient(BaseLLMClient):
         questions: List[Dict[str, str]],
         ad_info: Optional[Dict] = None,
         instruction: Optional[str] = None,
+        report_mode: bool = False,
     ) -> dict:
         """Build Anthropic API payload following MMAD protocol."""
 
@@ -127,16 +128,22 @@ class ClaudeClient(BaseLLMClient):
                 instruction = INSTRUCTION
 
         # Add text prompt
-        content.append({
-            "type": "text",
-            "text": (
+        if report_mode:
+            prompt_text = instruction + "\n"
+            if incontext:
+                prompt_text += incontext + "\n"
+            prompt_text += "The last image is the query image.\n"
+            if conversation_text.strip():
+                prompt_text += conversation_text
+        else:
+            prompt_text = (
                 instruction +
                 incontext +
                 "The last image is the query image. " +
                 "Following is the question list: \n" +
                 conversation_text
             )
-        })
+        content.append({"type": "text", "text": prompt_text})
 
         payload = {
             "model": self.model,

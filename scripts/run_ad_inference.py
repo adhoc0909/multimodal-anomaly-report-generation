@@ -1,24 +1,15 @@
-"""Unified PatchCore inference runner (checkpoint + ONNX backends).
+"""Unified PatchCore inference runner (checkpoint backend).
 
 This script generates AD prediction JSON for downstream LLM evaluation.
 
 Examples:
-    # Checkpoint backend (recommended for now)
+    # Checkpoint backend
     python scripts/run_ad_inference.py \
-        --backend ckpt \
         --checkpoint-dir /path/to/checkpoints \
         --data-root /path/to/MMAD \
         --mmad-json /path/to/mmad.json \
         --output output/ad_predictions.json \
         --device cuda
-
-    # ONNX backend (future deployment)
-    python scripts/run_ad_inference.py \
-        --backend onnx \
-        --models-dir models/onnx \
-        --data-root /path/to/MMAD \
-        --mmad-json /path/to/mmad.json \
-        --output output/ad_predictions_onnx.json
 """
 from __future__ import annotations
 
@@ -46,7 +37,6 @@ PROJ_ROOT = SCRIPT_PATH.parents[1]
 if str(PROJ_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJ_ROOT))
 
-from src.anomaly import PatchCoreModelManager
 from src.utils.loaders import load_config
 
 DEFAULT_AD_POLICY: Dict[str, Any] = {
@@ -941,50 +931,6 @@ class PatchCoreCheckpointRunner:
         gc.collect()
 
 
-class PatchCoreOnnxRunner:
-    def __init__(self, models_dir: Path, *, threshold: float, device: str):
-        self.manager = PatchCoreModelManager(models_dir=models_dir, threshold=threshold, device=device)
-
-    def list_available_models(self) -> List[Tuple[str, str]]:
-        return self.manager.list_available_models()
-
-    def warmup_model(self, dataset: str, category: str) -> None:
-        # ONNXRuntime session is initialized lazily on first get_model.
-        _ = self.manager.get_model(dataset, category)
-
-    def predict(
-        self,
-        dataset: str,
-        category: str,
-        image: np.ndarray,
-        original_size: Optional[Tuple[int, int]] = None,
-    ) -> Dict[str, Any]:
-        result = self.manager.predict(dataset, category, image)
-        return {
-            "anomaly_score": float(result.anomaly_score),
-            "anomaly_map": result.anomaly_map,
-            "is_anomaly": bool(result.is_anomaly),
-            "threshold": float(result.threshold),
-            "backend": "onnx",
-            "original_size": [int(original_size[0]), int(original_size[1])] if original_size is not None else None,
-        }
-
-    def predict_batch(
-        self,
-        dataset: str,
-        category: str,
-        images: List[np.ndarray],
-        *,
-        original_sizes: Optional[List[Tuple[int, int]]] = None,
-    ) -> List[Dict[str, Any]]:
-        if original_sizes is None or len(original_sizes) != len(images):
-            original_sizes = [img.shape[:2] for img in images]
-        return [self.predict(dataset, category, image, original_size=size) for image, size in zip(images, original_sizes)]
-
-    def clear_cache(self) -> None:
-        self.manager.clear_cache()
-
-
 def load_images(mmad_json: Path, *, datasets: Optional[List[str]], categories: Optional[List[str]]) -> List[str]:
     with open(mmad_json, "r", encoding="utf-8") as f:
         mmad_data = json.load(f)
@@ -1341,16 +1287,11 @@ def resolve_config(args: argparse.Namespace) -> Tuple[Optional[int], Optional[Li
 def main() -> None:
     parser = argparse.ArgumentParser(description="Unified PatchCore AD inference")
 
-    # Backend
-    parser.add_argument("--backend", type=str, default="ckpt", choices=["ckpt", "onnx"], help="Inference backend")
-
-    # Backend-specific paths
-    parser.add_argument("--checkpoint-dir", type=str, default=None, help="Checkpoint root (for ckpt backend)")
-    parser.add_argument("--models-dir", type=str, default="models/onnx", help="ONNX model root (for onnx backend)")
+    parser.add_argument("--checkpoint-dir", type=str, default=None, help="Checkpoint root")
 
     # Common runtime
     parser.add_argument("--config", type=str, default="configs/anomaly.yaml", help="Config file for filters/version")
-    parser.add_argument("--version", type=int, default=None, help="Checkpoint version override (ckpt backend)")
+    parser.add_argument("--version", type=int, default=None, help="Checkpoint version override")
     parser.add_argument("--datasets", type=str, nargs="*", default=None, help="Dataset filter override")
     parser.add_argument("--categories", type=str, nargs="*", default=None, help="Category filter override")
     parser.add_argument("--threshold", type=float, default=0.5, help="Default anomaly threshold")
@@ -1433,7 +1374,7 @@ def main() -> None:
 
     config_version, config_datasets, config_categories, input_size = resolve_config(args)
 
-    print(f"Backend: {args.backend}")
+    print("Backend: ckpt")
     print(f"Config: {args.config}")
     print(f"Output format: {args.output_format}")
     print(f"Context mode: {args.context_mode}")
@@ -1449,33 +1390,25 @@ def main() -> None:
     print(f"Keep model cache: {args.keep_model_cache}")
     print(f"Version: v{config_version}" if config_version is not None else "Version: latest")
     print(f"Filters: datasets={config_datasets} categories={config_categories}")
-    if args.backend == "ckpt":
-        print(f"Input size: {input_size}")
-    if args.backend == "ckpt":
-        if not args.checkpoint_dir:
-            print("Error: --checkpoint-dir is required for ckpt backend")
-            sys.exit(1)
-        checkpoint_dir = Path(args.checkpoint_dir)
-        if not checkpoint_dir.exists():
-            print(f"Error: Checkpoint directory not found: {checkpoint_dir}")
-            sys.exit(1)
-        runner = PatchCoreCheckpointRunner(
-            checkpoint_dir=checkpoint_dir,
-            version=config_version,
-            threshold=args.threshold,
-            device=args.device,
-            input_size=input_size,
-            allow_online_backbone=args.allow_online_backbone,
-            sync_timing=args.sync_timing,
-            postprocess_map=args.postprocess_map,
-            use_amp=args.amp,
-        )
-    else:
-        models_dir = Path(args.models_dir)
-        if not models_dir.exists():
-            print(f"Error: Models directory not found: {models_dir}")
-            sys.exit(1)
-        runner = PatchCoreOnnxRunner(models_dir=models_dir, threshold=args.threshold, device=args.device)
+    print(f"Input size: {input_size}")
+    if not args.checkpoint_dir:
+        print("Error: --checkpoint-dir is required")
+        sys.exit(1)
+    checkpoint_dir = Path(args.checkpoint_dir)
+    if not checkpoint_dir.exists():
+        print(f"Error: Checkpoint directory not found: {checkpoint_dir}")
+        sys.exit(1)
+    runner = PatchCoreCheckpointRunner(
+        checkpoint_dir=checkpoint_dir,
+        version=config_version,
+        threshold=args.threshold,
+        device=args.device,
+        input_size=input_size,
+        allow_online_backbone=args.allow_online_backbone,
+        sync_timing=args.sync_timing,
+        postprocess_map=args.postprocess_map,
+        use_amp=args.amp,
+    )
 
     runtime_device = str(runner.device) if hasattr(runner, "device") else args.device
     print(f"Device: {runtime_device}")
@@ -1660,7 +1593,7 @@ def main() -> None:
                                 policy=policy,
                                 calibration=calibration,
                                 context_mode=args.context_mode,
-                                backend=args.backend,
+                                backend="ckpt",
                                 model_threshold=args.threshold,
                             )
                             window_save_time += time.perf_counter() - save_t0
@@ -1737,7 +1670,7 @@ def main() -> None:
         policy=policy,
         calibration=calibration,
         context_mode=args.context_mode,
-        backend=args.backend,
+        backend="ckpt",
         model_threshold=args.threshold,
     )
 

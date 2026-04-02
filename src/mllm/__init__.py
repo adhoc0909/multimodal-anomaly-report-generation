@@ -1,10 +1,8 @@
 """MLLM clients for MMAD evaluation."""
-from .echo import EchoMLLM
 from .base import BaseLLMClient, INSTRUCTION
 from .factory import get_llm_client, MODEL_REGISTRY, list_llm_models
 
 __all__ = [
-    "EchoMLLM",
     "BaseLLMClient",
     "INSTRUCTION",
     # Factory
@@ -18,6 +16,7 @@ __all__ = [
     "get_qwen_client",
     "get_internvl_client",
     "get_llava_client",
+    "get_gemma3_client",
 ]
 
 
@@ -56,3 +55,9 @@ def get_llava_client(*args, **kwargs):
     """Get LLaVA client (requires transformers or llava package)."""
     from .llava_client import LLaVAClient
     return LLaVAClient(*args, **kwargs)
+
+
+def get_gemma3_client(*args, **kwargs):
+    """Get Gemma3 client (requires transformers; quantization requires bitsandbytes + CUDA)."""
+    from .gemma3_client import Gemma3Client
+    return Gemma3Client(*args, **kwargs)

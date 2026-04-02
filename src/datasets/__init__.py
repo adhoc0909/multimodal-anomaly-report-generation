@@ -1,1 +1,3 @@
-from .mmad import load_mmad_samples, get_templates
+"""Dataset package."""
+
+__all__: list[str] = []

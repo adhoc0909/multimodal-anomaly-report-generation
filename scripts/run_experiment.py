@@ -28,11 +28,25 @@ import random
 import subprocess
 import sys
 import time
+import warnings
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-
 from tqdm import tqdm
+
+# Suppress noisy C++ library warnings (CUDA/XLA/absl) — must be set before any imports
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+os.environ.setdefault("GRPC_VERBOSITY", "ERROR")
+os.environ.setdefault("GLOG_minloglevel", "3")
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+
+# Load .env (HF_TOKEN, API keys 등)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+warnings.filterwarnings('ignore')
 
 # Path setup
 SCRIPT_PATH = Path(__file__).resolve()
@@ -45,6 +59,7 @@ from src.ad import load_ad_predictions_file, normalize_image_key, to_llm_ad_info
 from src.mllm.factory import MODEL_REGISTRY, get_llm_client, list_llm_models
 from src.mllm.base import format_ad_info
 from src.eval.metrics import calculate_accuracy_mmad
+from src.utils.log import setup_logger
 
 
 def stratified_sample(image_paths: list[str], n_per_folder: int, seed: int = 42) -> list[str]:
@@ -121,7 +136,6 @@ def run_ad_inference(cfg: ExperimentConfig, data_root: str, mmad_json: str) -> s
     # Build command
     cmd = [
         sys.executable, inference_script,
-        "--backend", "ckpt",
         "--checkpoint-dir", checkpoint_dir,
         "--data-root", data_root,
         "--mmad-json", mmad_json,
@@ -214,6 +228,8 @@ def run_experiment(cfg: ExperimentConfig) -> Path:
     output_dir = Path(cfg.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    logger = setup_logger(name="Experiment", log_prefix="experiment", console_logging=False)
+
     # Load dataset & sampling (AD inference 전에 먼저 수행)
     mmad_data = load_mmad_data(mmad_json)
     image_paths = list(mmad_data.keys())
@@ -247,7 +263,8 @@ def run_experiment(cfg: ExperimentConfig) -> Path:
             print(f"Error: domain_knowledge.json not found at {rag_json}")
             sys.exit(1)
 
-        indexer = Indexer(json_path=rag_json, persist_dir="vectorstore/domain_knowledge")
+        rag_persist_dir = getattr(cfg, "rag_persist_dir", None) or "vectorstore/domain_knowledge"
+        indexer = Indexer(json_path=rag_json, persist_dir=rag_persist_dir)
         vectorstore = indexer.get_or_create()
         rag_retriever = Retrievers(vectorstore)
         print(f"RAG enabled: {vectorstore._collection.count()} documents indexed")
@@ -267,6 +284,12 @@ def run_experiment(cfg: ExperimentConfig) -> Path:
     print(f"Output:      {answers_json_path}")
     print("=" * 60)
     print()
+
+    logger.info(
+        f"[Config] experiment={cfg.experiment_name} | llm={cfg.llm} | "
+        f"ad={cfg.ad_model or 'none'} | rag={cfg.rag} | "
+        f"few_shot={cfg.few_shot} | images={len(image_paths)}"
+    )
 
     # 샘플링된 이미지만으로 필터링된 MMAD json 생성 (AD inference용)
     sampled_mmad_json = mmad_json
@@ -304,12 +327,31 @@ def run_experiment(cfg: ExperimentConfig) -> Path:
         print(f"Error: {e}")
         sys.exit(1)
 
+    # Warm up local model before timing starts (excludes cold-start from per-image latency)
+    if hasattr(llm_client, 'load_model'):
+        print("Warming up model (pre-loading weights)...")
+        llm_client.load_model()
+        print("Warming up with dummy forward pass...")
+        try:
+            warmup_rel = image_paths[0]
+            warmup_path = str(Path(data_root) / warmup_rel)
+            warmup_meta = mmad_data[warmup_rel]
+            if cfg.batch_mode:
+                llm_client.generate_answers_batch(warmup_path, warmup_meta, [], ad_info=None, instruction=None)
+            else:
+                llm_client.generate_answers(warmup_path, warmup_meta, [], ad_info=None, instruction=None)
+        except Exception:
+            pass
+        print("Model ready.")
+        print()
+
     # Track statistics
     total_correct = 0
     total_questions = 0
     processed = 0
     errors = 0
     start_time = time.time()
+    class_latencies: dict = defaultdict(list)
 
     # Evaluate with progress bar
     pbar = tqdm(image_paths, desc="Evaluating", ncols=100)
@@ -349,14 +391,17 @@ def run_experiment(cfg: ExperimentConfig) -> Path:
             ds_name = parts[0] if len(parts) > 0 else ""
             cat_name = parts[1] if len(parts) > 1 else ""
 
-            query = f"{cat_name} defect anomaly"
-            docs = rag_retriever.retrieve(query, dataset=ds_name, category=cat_name, k=3)
+            # defect_type 유출 방지: ground-truth defect_type을 쿼리/필터에 사용하지 않음
+            # 프로덕션과 동일한 generic 쿼리 사용 (category 기반)
+            query = rag_retriever.build_generic_query(cat_name)
+            docs = rag_retriever.retrieve(query, category=cat_name, defect_type=None, k=cfg.rag_k)
             domain_knowledge = rag_retriever.format_context(docs)
 
             ad_info_str = format_ad_info(ad_info) if ad_info else ""
             instruction = rag_prompt(ad_info=ad_info_str, domain_knowledge=domain_knowledge)
 
         # Generate answers
+        img_start = time.time()
         if cfg.batch_mode:
             questions, answers, predicted, q_types = llm_client.generate_answers_batch(
                 query_image_path, meta, few_shot_paths, ad_info=ad_info, instruction=instruction
@@ -365,10 +410,16 @@ def run_experiment(cfg: ExperimentConfig) -> Path:
             questions, answers, predicted, q_types = llm_client.generate_answers(
                 query_image_path, meta, few_shot_paths, ad_info=ad_info, instruction=instruction
             )
+        img_latency = time.time() - img_start
 
         if predicted is None or len(predicted) != len(answers):
             errors += 1
             continue
+
+        # Accumulate per-class latency (성공한 이미지만)
+        parts = image_rel.split("/")
+        cls_key = f"{parts[0]}/{parts[1]}" if len(parts) >= 2 else parts[0]
+        class_latencies[cls_key].append(img_latency)
 
         # Calculate accuracy for this image
         correct = sum(1 for p, a in zip(predicted, answers) if p == a)
@@ -398,6 +449,25 @@ def run_experiment(cfg: ExperimentConfig) -> Path:
 
     elapsed = time.time() - start_time
     final_acc = total_correct / total_questions if total_questions > 0 else 0
+
+    # Print & log class-level latency table
+    if class_latencies:
+        print()
+        print("=" * 60)
+        print("Latency by Class")
+        print("=" * 60)
+        print(f"  {'Class':<32} {'N':>4}  {'Avg(s)':>7}  {'Total(s)':>9}")
+        print("-" * 60)
+        for cls_key in sorted(class_latencies.keys()):
+            lats = class_latencies[cls_key]
+            avg_lat = sum(lats) / len(lats)
+            total_lat = sum(lats)
+            print(f"  {cls_key:<32} {len(lats):>4}  {avg_lat:>7.2f}  {total_lat:>9.2f}")
+            logger.info(f"[Latency] {cls_key} | n={len(lats)} | avg={avg_lat:.3f}s | total={total_lat:.1f}s")
+        print("-" * 60)
+        overall_avg = elapsed / processed if processed > 0 else 0
+        print(f"  {'Overall':<32} {processed:>4}  {overall_avg:>7.2f}  {elapsed:>9.1f}")
+        print()
 
     # Save metadata
     meta_path = answers_json_path.with_suffix(".meta.json")
@@ -437,6 +507,13 @@ def run_experiment(cfg: ExperimentConfig) -> Path:
     print(f"Results saved to: {answers_json_path}")
     print(f"Metadata saved to: {meta_path}")
     print(f"Elapsed: {elapsed:.1f}s")
+
+    overall_avg = elapsed / processed if processed > 0 else 0
+    logger.info(
+        f"[Result] acc={round(final_acc * 100, 2)}% | "
+        f"questions={total_questions} | correct={total_correct} | "
+        f"elapsed={elapsed:.1f}s | avg={overall_avg:.3f}s/img"
+    )
 
     return answers_json_path
 
@@ -480,6 +557,11 @@ def main():
                         help="Enable RAG domain knowledge injection")
     parser.add_argument("--rag-json", type=str, default=None,
                         help="Path to domain_knowledge.json (default: {data_root}/domain_knowledge.json)")
+    parser.add_argument("--rag-persist-dir", type=str, default=None,
+                        help="Chroma vectorstore 경로 (default: vectorstore/domain_knowledge). "
+                             "Config A/B/C 비교 실험 시 각각 다른 경로 지정.")
+    parser.add_argument("--rag-top-k", type=int, default=None,
+                        help="RAG 검색 문서 수 (default: 3)")
 
     # Utility
     parser.add_argument("--list-models", action="store_true",
@@ -535,6 +617,10 @@ def main():
         cfg.rag = args.rag
     if args.rag_json is not None:
         cfg.rag_json_path = args.rag_json
+    if args.rag_persist_dir is not None:
+        cfg.rag_persist_dir = args.rag_persist_dir
+    if args.rag_top_k is not None:
+        cfg.rag_k = args.rag_top_k
 
     # 모델별 기본값 적용 (CLI로 명시하지 않은 경우)
     _BATCH_MODE_DEFAULTS = {

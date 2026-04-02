@@ -1,0 +1,17 @@
+# GPU 오버라이드 파일 (Gemma3 INT4 로컬 모델 사용 시)
+# 사용법: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# 전제 조건:
+#   - nvidia-container-toolkit 설치 필요
+#   - GCP GPU VM: https://cloud.google.com/compute/docs/gpus/install-drivers-gpu
+#   - 로컬: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+
+services:
+  api:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

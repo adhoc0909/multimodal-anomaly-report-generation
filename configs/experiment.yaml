@@ -5,7 +5,7 @@ ad_model: null          # patchcore | winclip | efficientad | null (no AD)
 llm: internvl               # qwen | llava | gpt-4o | claude | gemini | internvl | ...
 
 # Data paths (override with env vars or CLI args)
-data_root: /content/drive/Othercomputers/mynotebook/multimodal-anomaly-report-generation/dataset/MMAD
+data_root: /content/drive/Othercomputers/Mac/multiModal_anomaly_report/dataset/MMAD
 mmad_json: ${MMAD_JSON:-dataset/MMAD/mmad_10classes.json}
 output_dir: outputs/eval
 
@@ -13,7 +13,7 @@ eval:
   few_shot: 1
   similar_template: false
   max_images: null       # null = all images, set number for quick testing
-  sample_per_folder: 3   # 폴더별 N장 샘플링 (null = 전체). dataset/category/split별로 N장씩 추출
+  sample_per_folder: null   # 폴더별 N장 샘플링 (null = 전체). dataset/category/split별로 N장씩 추출
   sample_seed: 42        # 샘플링 시드 (재현성)
   max_image_size: [384, 384]  # LLM에 전달할 이미지 최대 크기 [width, height]
   batch_mode: false
@@ -29,5 +29,5 @@ ad:
   config: configs/anomaly.yaml                     # run_ad_inference.py 설정 파일
   output: null                                     # 기존 예측 JSON (있으면 inference 스킵)
   threshold: 0.5                                   # anomaly threshold
-  checkpoint_dir: /content/drive/Othercomputers/mynotebook/multimodal-anomaly-report-generation/dataset/MMAD/checkpoints/patchcore_anomalib  # {dir}/Patchcore/{dataset}/{category}/v{N}/model.ckpt
-  version: 1                                    # 체크포인트 버전 (null = 최신, 1, 2, 3...)
+  checkpoint_dir: /content/drive/Othercomputers/Mac/multiModal_anomaly_report/dataset/MMAD/checkpoints/patchcore_384  # {dir}/Patchcore/{dataset}/{category}/v{N}/model.ckpt
+  version: 0                                       # 체크포인트 버전 (null = 최신, 1, 2, 3...)

@@ -79,6 +79,10 @@ class QwenVLClient(BaseLLMClient):
 
         # Model loaded
 
+    def load_model(self):
+        """Public interface for model warm-up before timed evaluation."""
+        self._load_model()
+
     def build_payload(
         self,
         query_image_path: str,
@@ -86,6 +90,7 @@ class QwenVLClient(BaseLLMClient):
         questions: List[Dict[str, str]],
         ad_info: Optional[Dict] = None,
         instruction: Optional[str] = None,
+        report_mode: bool = False,
     ) -> dict:
         """Build Qwen VL message format."""
         content = []
@@ -99,7 +104,8 @@ class QwenVLClient(BaseLLMClient):
 
         # Instruction
         content.append({"type": "text", "text": instruction})
-        content.append({"type": "text", "text": "Answer with the option's letter from the given choices directly!"})
+        if not report_mode:
+            content.append({"type": "text", "text": "Answer with the option's letter from the given choices directly!"})
 
         # Few-shot templates
         if few_shot_paths:
@@ -111,13 +117,21 @@ class QwenVLClient(BaseLLMClient):
                 content.append({"type": "image", "image": ref_path})
 
         # Query image
-        content.append({"type": "text", "text": "Following is the query image:"})
+        if report_mode:
+            content.append({"type": "text", "text": "Following is the query image for inspection report generation:"})
+        else:
+            content.append({"type": "text", "text": "Following is the query image:"})
         content.append({"type": "image", "image": query_image_path})
 
-        # Questions
-        content.append({"type": "text", "text": "Following is the question list:"})
-        for q in questions:
-            content.append({"type": "text", "text": q["text"]})
+        # Questions / report prompt text
+        if report_mode:
+            for q in questions:
+                if q.get("text"):
+                    content.append({"type": "text", "text": q["text"]})
+        else:
+            content.append({"type": "text", "text": "Following is the question list:"})
+            for q in questions:
+                content.append({"type": "text", "text": q["text"]})
 
         return {"content": content}
 

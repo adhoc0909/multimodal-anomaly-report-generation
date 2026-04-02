@@ -1,7 +1,7 @@
 """Anomaly detection module.
 
 Provides unified interface for anomaly detection models:
-- PatchCore (ONNX)
+- shared base interfaces
 """
 from .base import (
     AnomalyResult,
@@ -9,7 +9,6 @@ from .base import (
     PerClassAnomalyModel,
     UnifiedAnomalyModel,
 )
-from .patchcore_onnx import PatchCoreOnnx, PatchCoreModelManager
 
 __all__ = [
     # Base classes
@@ -17,7 +16,4 @@ __all__ = [
     "BaseAnomalyModel",
     "PerClassAnomalyModel",
     "UnifiedAnomalyModel",
-    # PatchCore
-    "PatchCoreOnnx",
-    "PatchCoreModelManager",
 ]

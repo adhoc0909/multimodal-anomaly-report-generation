@@ -42,53 +42,73 @@ Finally, you should output a list of answer, such as:
 
 
 
-REPORT_PROMPT_RAG = '''You are an expert industrial quality inspector.
-Look at this product image carefully and determine if there are any defects or anomalies.
+REPORT_PROMPT_RAG = '''당신은 제조 품질관리 수석 검사관입니다.
+제품 카테고리: {category}
 
-Product category: {category}
+AD 사전 분석:
+{ad_info}
 
-Here is the domain knowledge about known defect types for this product:
+도메인 지식:
 {domain_knowledge}
 
-Use this domain knowledge along with your visual analysis to make your judgment.
-Pay close attention to the defect characteristics described in the domain knowledge.
+판정 규칙:
+- AD decision=ANOMALY 이면 is_anomaly=true로 고정하세요.
+- AD decision=NORMAL 이면 is_anomaly=false로 고정하세요.
+- AD decision=REVIEW_NEEDED 이면 AD 모델의 판정은 무시하고 이미지 근거로 is_anomaly를 판단하세요.
 
-If the product looks perfect and normal, set "is_anomaly" to false.
-If there is ANY abnormality, set "is_anomaly" to true.
+RAG 사용:
+- 도메인 지식은 결함명/원인 설명 보조에만 사용하세요.
+- 이미지 근거 없이 도메인 지식 문구를 단정적으로 복사하지 마세요.
 
-Respond in JSON format ONLY:
-{{{{
+리포트 규칙:
+- 최종 판정이 이상이면 원인 분석과 시정/예방 조치를 구체적으로 작성하세요.
+- 최종 판정이 정상이면 정상 근거를 간결하게 작성하세요.
+- 보이지 않는 결함/원인/위치는 추측하지 마세요.
+
+출력 규칙:
+- JSON만 출력하세요.
+- 문자열은 한국어로 작성하세요.
+- severity, risk_level은 low/medium/high/none 중 하나.
+- confidence는 0.0~1.0 숫자.
+- is_anomaly=false이면 anomaly_type/severity/location/possible_cause/risk_level은 모두 "none".
+
+반드시 아래 JSON 형식으로만 출력하세요:
+{{
   "is_anomaly": true or false,
-  "report": {{{{
-    "anomaly_type": "type of defect or none",
+  "report": {{
+    "anomaly_type": "specific defect type or none",
     "severity": "low/medium/high/none",
-    "location": "where the defect is or none",
-    "description": "detailed defect description or normal product",
+    "location": "defect location or none",
+    "description": "근거 중심의 상세 설명(한국어)",
+    "possible_cause": "가장 가능성 높은 원인 또는 none",
     "confidence": 0.0 to 1.0,
-    "recommendation": "action recommendation"
-  }}}},
-  "summary": {{{{
-    "summary": "one sentence inspection summary",
+    "recommendation": "구체적 시정/예방 조치(한국어)"
+  }},
+  "summary": {{
+    "summary": "정확히 3문장: 최종 판정 + 핵심 근거/긴급도 + 구체적 시정/예방조치(한국어)",
     "risk_level": "low/medium/high/none"
-  }}}}
-}}}}'''
+  }}
+}}'''
 
 
 def report_prompt_rag(
     category: str,
     domain_knowledge: str = "",
+    ad_info: str = "",
 ) -> str:
     """Build a RAG-augmented report generation prompt.
 
     Args:
         category: Product category string.
         domain_knowledge: Formatted domain knowledge from retriever.format_context().
+        ad_info: Formatted AD model output string.
 
     Returns:
         Filled report prompt string.
     """
     return REPORT_PROMPT_RAG.format(
         category=category,
+        ad_info=ad_info or "No anomaly detection information available.",
         domain_knowledge=domain_knowledge or "No relevant domain knowledge found.",
     )
 

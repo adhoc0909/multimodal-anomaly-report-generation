@@ -23,6 +23,7 @@ __pycache__/
 
 # ===== Env =====
 .env
+.env.local
 .venv/
 venv/
 
@@ -47,6 +48,8 @@ Thumbs.db
 *.egg-info/
 /dist
 /build
+node_modules/
+**/node_modules/
 .eggs/
 *.egg
 
@@ -62,3 +65,12 @@ AGENTS.md
 
 # vectorstore
 vectorstore/
+
+# legacy snapshot (temporary import source)
+legacy/
+
+# jupyter
+notebooks/
+
+# docs
+docs/
